@@ -6,7 +6,7 @@
  * responsible for tokenizing, classifying, and extracting linguistic elements
  * from text.
  *
- * @author Limdy Development Team
+ * @author Mirza Bicer
  * @date 2024-08-23
  */
 
