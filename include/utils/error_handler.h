@@ -7,7 +7,7 @@
  * them consistently across the application.
  *
  * @author Mirza Bicer
- * @date 2024-08-22
+ * @date 2024-08-23
  */
 
 #ifndef LIMDY_UTILS_ERROR_HANDLER_H
@@ -33,22 +33,28 @@ typedef enum
  */
 typedef enum
 {
-    ERROR_SUCCESS = 0,              /**< Operation completed successfully */
-    ERROR_NULL_POINTER,             /**< Null pointer error */
-    ERROR_INVALID_ARGUMENT,         /**< Invalid argument provided */
-    ERROR_MEMORY_ALLOCATION,        /**< Memory allocation failure */
-    ERROR_FILE_IO,                  /**< File input/output error */
-    ERROR_NETWORK,                  /**< Network-related error */
-    ERROR_UNKNOWN,                  /**< Unknown error */
-    ERROR_THREAD_LOCK,              /**< Thread lock error */
-    ERROR_THREAD_UNLOCK,            /**< Thread unlock error */
-    ERROR_THREAD_INIT,              /**< Thread initialization error */
-    ERROR_MEMORY_POOL_INIT_FAILED,  /**< Memory pool initialization failure */
-    ERROR_MEMORY_POOL_ALLOC_FAILED, /**< Memory pool allocation failure */
-    ERROR_MEMORY_POOL_INVALID_FREE, /**< Invalid memory free operation */
-    ERROR_MEMORY_POOL_FULL,         /**< Memory pool is full */
-    ERROR_MEMORY_POOL_INVALID_POOL, /**< Invalid memory pool */
-    ERROR_CUSTOM_BASE = 1000        /**< Base for component-specific error codes */
+    ERROR_SUCCESS = 0,                    /**< Operation completed successfully */
+    ERROR_NULL_POINTER,                   /**< Null pointer error */
+    ERROR_INVALID_ARGUMENT,               /**< Invalid argument provided */
+    ERROR_MEMORY_ALLOCATION,              /**< Memory allocation failure */
+    ERROR_FILE_IO,                        /**< File input/output error */
+    ERROR_NETWORK,                        /**< Network-related error */
+    ERROR_UNKNOWN,                        /**< Unknown error */
+    ERROR_THREAD_LOCK,                    /**< Thread lock error */
+    ERROR_THREAD_UNLOCK,                  /**< Thread unlock error */
+    ERROR_THREAD_INIT,                    /**< Thread initialization error */
+    ERROR_MEMORY_POOL_INIT_FAILED,        /**< Memory pool initialization failure */
+    ERROR_MEMORY_POOL_ALLOC_FAILED,       /**< Memory pool allocation failure */
+    ERROR_MEMORY_POOL_INVALID_FREE,       /**< Invalid memory free operation */
+    ERROR_MEMORY_POOL_FULL,               /**< Memory pool is full */
+    ERROR_MEMORY_POOL_INVALID_POOL,       /**< Invalid memory pool */
+    ERROR_RENDERER_TOKENIZATION_FAILED,   /**< Tokenization failure */
+    ERROR_RENDERER_CLASSIFICATION_FAILED, /**< Classification failure */
+    ERROR_RENDERER_EXTRACTION_FAILED,     /**< Linguistic element extraction failure */
+    ERROR_RENDERER_INVALID_LANGUAGE,      /**< Invalid language specified */
+    ERROR_RENDERER_SERVICE_UNAVAILABLE,   /**< Tokenization or classification service unavailable */
+
+    ERROR_CUSTOM_BASE = 1000 /**< Base for component-specific error codes */
 } ErrorCode;
 
 /**
