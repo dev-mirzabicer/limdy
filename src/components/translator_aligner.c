@@ -7,61 +7,14 @@
  * with the original.
  *
  * @author Mirza Bicer
- * @date 2024-08-22
+ * @date 2024-08-23
  */
 
 #include "components/translator_aligner.h"
 #include <stdlib.h>
 #include <string.h>
 #include "utils/limdy_utils.h"
-
-/**
- * @brief Allocates a 2D float array using the memory pool.
- *
- * @param pool The memory pool to use for allocation.
- * @param rows The number of rows in the array.
- * @param cols The number of columns in the array.
- * @return A pointer to the allocated 2D array, or NULL if allocation fails.
- */
-static float **allocate_2d_float_array(LimdyMemoryPool *pool, size_t rows, size_t cols)
-{
-    float **array = limdy_memory_pool_alloc_from(pool, rows * sizeof(float *));
-    CHECK_NULL(array, ERROR_MEMORY_POOL_ALLOC_FAILED);
-
-    for (size_t i = 0; i < rows; i++)
-    {
-        array[i] = limdy_memory_pool_alloc_from(pool, cols * sizeof(float));
-        if (!array[i])
-        {
-            for (size_t j = 0; j < i; j++)
-            {
-                limdy_memory_pool_free_to(pool, array[j]);
-            }
-            limdy_memory_pool_free_to(pool, array);
-            LOG_ERROR(ERROR_MEMORY_POOL_ALLOC_FAILED, "Failed to allocate memory for 2D float array row");
-            return NULL;
-        }
-    }
-    return array;
-}
-
-/**
- * @brief Frees a 2D float array using the memory pool.
- *
- * @param pool The memory pool used for allocation.
- * @param array The 2D array to free.
- * @param rows The number of rows in the array.
- */
-static void free_2d_float_array(LimdyMemoryPool *pool, float **array, size_t rows)
-{
-    if (!array)
-        return;
-    for (size_t i = 0; i < rows; i++)
-    {
-        limdy_memory_pool_free_to(pool, array[i]);
-    }
-    limdy_memory_pool_free_to(pool, array);
-}
+#include "utils/memory_pool.h"
 
 /**
  * @brief Creates a new Translator instance.
@@ -85,6 +38,7 @@ Translator *translator_create(TranslationService *service)
         return NULL;
     }
 
+    translator->pool = NULL;
     ErrorCode error = limdy_memory_pool_create(LIMDY_SMALL_POOL_SIZE, &translator->pool);
     if (error != ERROR_SUCCESS)
     {
@@ -107,7 +61,10 @@ void translator_destroy(Translator *translator)
     if (translator)
     {
         pthread_mutex_destroy(&translator->mutex);
-        limdy_memory_pool_destroy(translator->pool);
+        if (translator->pool)
+        {
+            limdy_memory_pool_destroy(translator->pool);
+        }
         limdy_memory_pool_free(translator);
     }
 }
@@ -135,12 +92,18 @@ ErrorCode translator_translate(Translator *translator, const char *text, const c
 
     MUTEX_LOCK(&translator->mutex);
 
-    memset(result, 0, sizeof(TranslationResult));
+    ErrorCode error = allocate_translation_result(result, LIMDY_LARGE_POOL_SIZE); // Use a large pool for potentially big translations
+    if (error != ERROR_SUCCESS)
+    {
+        MUTEX_UNLOCK(&translator->mutex);
+        return error;
+    }
 
-    ErrorCode error = translator->service->translate(text, source_lang, target_lang, &result->translated_text);
+    error = translator->service->translate(text, source_lang, target_lang, &result->translated_text);
     if (error != ERROR_SUCCESS)
     {
         LOG_ERROR(error, "Translation failed");
+        free_translation_result(result);
         MUTEX_UNLOCK(&translator->mutex);
         return error;
     }
@@ -149,8 +112,7 @@ ErrorCode translator_translate(Translator *translator, const char *text, const c
     if (error != ERROR_SUCCESS)
     {
         LOG_ERROR(error, "Failed to get attention matrix");
-        limdy_memory_pool_free_to(translator->pool, result->translated_text);
-        result->translated_text = NULL;
+        free_translation_result(result);
         MUTEX_UNLOCK(&translator->mutex);
         return error;
     }
@@ -184,6 +146,7 @@ Aligner *aligner_create(AlignmentService *service, Renderer *renderer)
         return NULL;
     }
 
+    aligner->pool = NULL;
     ErrorCode error = limdy_memory_pool_create(LIMDY_SMALL_POOL_SIZE, &aligner->pool);
     if (error != ERROR_SUCCESS)
     {
@@ -206,7 +169,10 @@ void aligner_destroy(Aligner *aligner)
     if (aligner)
     {
         pthread_mutex_destroy(&aligner->mutex);
-        limdy_memory_pool_destroy(aligner->pool);
+        if (aligner->pool)
+        {
+            limdy_memory_pool_destroy(aligner->pool);
+        }
         limdy_memory_pool_free(aligner);
     }
 }
@@ -238,23 +204,21 @@ ErrorCode aligner_align(Aligner *aligner, const char *source_text, const char *t
 
     MUTEX_LOCK(&aligner->mutex);
 
-    char **source_tokens = NULL;
-    size_t source_token_count = 0;
-    char **target_tokens = NULL;
-    size_t target_token_count = 0;
+    RendererResult source_result = {0};
+    RendererResult target_result = {0};
     int *alignment = NULL;
     size_t alignment_size = 0;
     ErrorCode error = ERROR_SUCCESS;
 
     // Tokenize source and target text
-    error = aligner->renderer->tokenize(source_text, &source_tokens, &source_token_count);
+    error = renderer_tokenize(aligner->renderer, source_text, LANG_ENGLISH, &source_result); // Assume English for now
     if (error != ERROR_SUCCESS)
     {
         LOG_ERROR(error, "Failed to tokenize source text");
         goto cleanup;
     }
 
-    error = aligner->renderer->tokenize(target_text, &target_tokens, &target_token_count);
+    error = renderer_tokenize(aligner->renderer, target_text, LANG_ENGLISH, &target_result); // Assume English for now
     if (error != ERROR_SUCCESS)
     {
         LOG_ERROR(error, "Failed to tokenize target text");
@@ -262,8 +226,8 @@ ErrorCode aligner_align(Aligner *aligner, const char *source_text, const char *t
     }
 
     // Align tokens
-    error = aligner->service->align_tokens((const char **)source_tokens, source_token_count,
-                                           (const char **)target_tokens, target_token_count,
+    error = aligner->service->align_tokens((const char **)source_result.tokens, source_result.token_count,
+                                           (const char **)target_result.tokens, target_result.token_count,
                                            attention_matrix, rows, cols,
                                            &alignment, &alignment_size);
     if (error != ERROR_SUCCESS)
@@ -276,36 +240,40 @@ ErrorCode aligner_align(Aligner *aligner, const char *source_text, const char *t
     *aligned_text = limdy_memory_pool_alloc_from(aligner->pool, alignment_size * sizeof(char *));
     if (!*aligned_text)
     {
-        LOG_ERROR(ERROR_MEMORY_POOL_ALLOC_FAILED, "Failed to allocate memory for aligned text");
-        error = ERROR_MEMORY_POOL_ALLOC_FAILED;
+        LOG_ERROR(ERROR_MEMORY_ALLOCATION, "Failed to allocate memory for aligned text");
+        error = ERROR_MEMORY_ALLOCATION;
         goto cleanup;
     }
 
     for (size_t i = 0; i < alignment_size; i++)
     {
-        size_t len = strlen(source_tokens[i]) + strlen(target_tokens[alignment[i]]) + 4; // 4 for "[", "]", " ", and null terminator
+        size_t len = source_result.tokens[i].length + target_result.tokens[alignment[i]].length + 4; // 4 for "[", "]", " ", and null terminator
         (*aligned_text)[i] = limdy_memory_pool_alloc_from(aligner->pool, len * sizeof(char));
         if (!(*aligned_text)[i])
         {
-            LOG_ERROR(ERROR_MEMORY_POOL_ALLOC_FAILED, "Failed to allocate memory for aligned text entry");
-            error = ERROR_MEMORY_POOL_ALLOC_FAILED;
+            LOG_ERROR(ERROR_MEMORY_ALLOCATION, "Failed to allocate memory for aligned text entry");
+            error = ERROR_MEMORY_ALLOCATION;
             goto cleanup;
         }
-        snprintf((*aligned_text)[i], len, "[%s] [%s]", source_tokens[i], target_tokens[alignment[i]]);
+        snprintf((*aligned_text)[i], len, "[%.*s] [%.*s]",
+                 (int)source_result.tokens[i].length, source_result.tokens[i].text,
+                 (int)target_result.tokens[alignment[i]].length, target_result.tokens[alignment[i]].text);
     }
 
     *aligned_size = alignment_size;
 
 cleanup:
-    if (source_tokens)
-        aligner->renderer->free_tokens(source_tokens, source_token_count);
-    if (target_tokens)
-        aligner->renderer->free_tokens(target_tokens, target_token_count);
+    renderer_free_result(aligner->renderer, &source_result);
+    renderer_free_result(aligner->renderer, &target_result);
     limdy_memory_pool_free_to(aligner->pool, alignment);
 
     if (error != ERROR_SUCCESS && *aligned_text)
     {
-        free_aligned_text(*aligned_text, alignment_size);
+        for (size_t i = 0; i < alignment_size; i++)
+        {
+            limdy_memory_pool_free_to(aligner->pool, (*aligned_text)[i]);
+        }
+        limdy_memory_pool_free_to(aligner->pool, *aligned_text);
         *aligned_text = NULL;
         *aligned_size = 0;
     }
@@ -431,6 +399,25 @@ ErrorCode translator_aligner_process(TranslatorAligner *ta, const char *text, co
     return error;
 }
 
+ErrorCode allocate_translation_result(TranslationResult *result, size_t pool_size)
+{
+    if (!result)
+    {
+        return ERROR_NULL_POINTER;
+    }
+
+    memset(result, 0, sizeof(TranslationResult));
+
+    ErrorCode error = limdy_memory_pool_create(pool_size, &result->pool);
+    if (error != ERROR_SUCCESS)
+    {
+        LOG_ERROR(error, "Failed to create memory pool for translation result");
+        return error;
+    }
+
+    return ERROR_SUCCESS;
+}
+
 /**
  * @brief Frees the resources of a translation result.
  *
@@ -440,8 +427,10 @@ void free_translation_result(TranslationResult *result)
 {
     if (result)
     {
-        limdy_memory_pool_free(result->translated_text);
-        free_2d_float_array(result->attention_matrix, result->rows, result->cols);
+        if (result->pool)
+        {
+            limdy_memory_pool_destroy(result->pool);
+        }
         memset(result, 0, sizeof(TranslationResult));
     }
 }
