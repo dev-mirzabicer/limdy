@@ -6,7 +6,7 @@
  * It provides a centralized way to define error codes, log errors, and handle
  * them consistently across the application.
  *
- * @author Limdy Development Team
+ * @author Mirza Bicer
  * @date 2024-08-22
  */
 

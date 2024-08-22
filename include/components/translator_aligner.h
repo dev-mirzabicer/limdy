@@ -26,7 +26,7 @@
 typedef struct
 {
     char *translated_text;    /**< The translated text */
-    float **attention_matrix; /**< Attention matrix for alignment */
+    float **attention_matrix; /**< Attention matrix (from the translator) for alignment */
     size_t rows;              /**< Number of rows in the attention matrix */
     size_t cols;              /**< Number of columns in the attention matrix */
 } TranslationResult;
@@ -72,7 +72,7 @@ typedef struct
      * @param source_token_count Number of source tokens.
      * @param target_tokens Array of target language tokens.
      * @param target_token_count Number of target tokens.
-     * @param attention_matrix The attention matrix.
+     * @param attention_matrix The attention matrix from the translator.
      * @param rows Number of rows in the attention matrix.
      * @param cols Number of columns in the attention matrix.
      * @param alignment Pointer to store the alignment result.
@@ -101,7 +101,7 @@ typedef struct
 typedef struct
 {
     AlignmentService *service; /**< The alignment service */
-    Renderer *renderer;        /**< The renderer for tokenization */
+    Renderer *renderer;        /**< The renderer for tokenization & processing */
     pthread_mutex_t mutex;     /**< Mutex for thread-safe operations */
     LimdyMemoryPool *pool;     /**< Memory pool for allocations */
 } Aligner;
@@ -166,7 +166,7 @@ void aligner_destroy(Aligner *aligner);
  * @param aligner The aligner to use.
  * @param source_text The source text.
  * @param target_text The target (translated) text.
- * @param attention_matrix The attention matrix.
+ * @param attention_matrix The attention matrix from the translator.
  * @param rows Number of rows in the attention matrix.
  * @param cols Number of columns in the attention matrix.
  * @param aligned_text Pointer to store the aligned text.
