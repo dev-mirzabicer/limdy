@@ -1,3 +1,15 @@
+/**
+ * @file error_handler.c
+ * @brief Implementation of the error handling system for the Limdy project.
+ *
+ * This file implements the error handling system defined in error_handler.h.
+ * It provides functions for logging errors, managing error contexts, and
+ * handling errors consistently across the application.
+ *
+ * @author Mirza Bicer
+ * @date 2024-08-22
+ */
+
 #include "utils/error_handler.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,36 +19,51 @@
 
 #define MAX_ERROR_QUEUE_SIZE 100
 
-// Thread-local storage for error context
+/**
+ * @brief Thread-local storage for error context.
+ */
 static __thread ErrorContext tls_error_context;
 
-// Global error handler
+/**
+ * @brief Global error handler function pointer.
+ */
 static ErrorHandler global_error_handler = NULL;
 
-// Minimum error level for logging
+/**
+ * @brief Minimum error level for logging.
+ */
 static ErrorLevel min_error_level = ERROR_LEVEL_DEBUG;
 
-// Mutex for thread-safe operations
+/**
+ * @brief Mutex for thread-safe operations.
+ */
 static pthread_mutex_t error_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-// Circular buffer for error history
+/**
+ * @brief Circular buffer for error history.
+ */
 static ErrorContext error_history[MAX_ERROR_QUEUE_SIZE];
+
+/**
+ * @brief Start index of the error history circular buffer.
+ */
 static int error_history_start = 0;
+
+/**
+ * @brief Number of errors in the error history.
+ */
 static int error_history_count = 0;
 
-// Initialize the error handling system
 void error_init(void)
 {
     pthread_mutex_init(&error_mutex, NULL);
 }
 
-// Clean up the error handling system
 void error_cleanup(void)
 {
     pthread_mutex_destroy(&error_mutex);
 }
 
-// Set a custom error handler
 void error_set_handler(ErrorHandler handler)
 {
     pthread_mutex_lock(&error_mutex);
@@ -44,7 +71,6 @@ void error_set_handler(ErrorHandler handler)
     pthread_mutex_unlock(&error_mutex);
 }
 
-// Set the minimum error level for logging
 void error_set_min_level(ErrorLevel level)
 {
     pthread_mutex_lock(&error_mutex);
@@ -52,7 +78,11 @@ void error_set_min_level(ErrorLevel level)
     pthread_mutex_unlock(&error_mutex);
 }
 
-// Internal function to add error to history
+/**
+ * @brief Add an error context to the error history.
+ *
+ * @param context Pointer to the error context to be added.
+ */
 static void add_to_error_history(const ErrorContext *context)
 {
     pthread_mutex_lock(&error_mutex);
@@ -72,7 +102,6 @@ static void add_to_error_history(const ErrorContext *context)
     pthread_mutex_unlock(&error_mutex);
 }
 
-// Log an error
 void error_log(ErrorCode code, ErrorLevel level, const char *file, int line, const char *function, const char *format, ...)
 {
     if (level < min_error_level)
@@ -111,19 +140,22 @@ void error_log(ErrorCode code, ErrorLevel level, const char *file, int line, con
     }
 }
 
-// Get the last error context
 const ErrorContext *error_get_last(void)
 {
     return &tls_error_context;
 }
 
-// Clear the last error
 void error_clear(void)
 {
     memset(&tls_error_context, 0, sizeof(ErrorContext));
 }
 
-// Helper function to get error level string
+/**
+ * @brief Get the string representation of an error level.
+ *
+ * @param level The error level.
+ * @return The string representation of the error level.
+ */
 static const char *get_error_level_string(ErrorLevel level)
 {
     switch (level)
@@ -143,6 +175,12 @@ static const char *get_error_level_string(ErrorLevel level)
     }
 }
 
+/**
+ * @brief Get the string representation of an error code.
+ *
+ * @param code The error code.
+ * @return The string representation of the error code.
+ */
 static const char *get_error_code_string(ErrorCode code)
 {
     switch (code)
@@ -182,7 +220,11 @@ static const char *get_error_code_string(ErrorCode code)
     }
 }
 
-// Default error handler that logs to a file
+/**
+ * @brief Default error handler that logs to a file.
+ *
+ * @param context Pointer to the error context.
+ */
 void default_error_handler(const ErrorContext *context)
 {
     FILE *log_file = fopen("error.log", "a");
@@ -210,7 +252,9 @@ void default_error_handler(const ErrorContext *context)
     fclose(log_file);
 }
 
-// Set the default error handler
+/**
+ * @brief Set the default error handler.
+ */
 void error_set_default_handler(void)
 {
     error_set_handler(default_error_handler);

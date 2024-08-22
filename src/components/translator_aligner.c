@@ -1,9 +1,28 @@
+/**
+ * @file translator_aligner.c
+ * @brief Implementation of the translation and alignment system for the Limdy project.
+ *
+ * This file implements the functions declared in translator_aligner.h. It provides
+ * the core functionality for translating text and aligning the translated text
+ * with the original.
+ *
+ * @author Mirza Bicer
+ * @date 2024-08-22
+ */
+
 #include "components/translator_aligner.h"
 #include <stdlib.h>
 #include <string.h>
 #include "utils/limdy_utils.h"
 
-// Helper function to allocate 2D float array using memory pool
+/**
+ * @brief Allocates a 2D float array using the memory pool.
+ *
+ * @param pool The memory pool to use for allocation.
+ * @param rows The number of rows in the array.
+ * @param cols The number of columns in the array.
+ * @return A pointer to the allocated 2D array, or NULL if allocation fails.
+ */
 static float **allocate_2d_float_array(LimdyMemoryPool *pool, size_t rows, size_t cols)
 {
     float **array = limdy_memory_pool_alloc_from(pool, rows * sizeof(float *));
@@ -26,7 +45,13 @@ static float **allocate_2d_float_array(LimdyMemoryPool *pool, size_t rows, size_
     return array;
 }
 
-// Helper function to free 2D float array using memory pool
+/**
+ * @brief Frees a 2D float array using the memory pool.
+ *
+ * @param pool The memory pool used for allocation.
+ * @param array The 2D array to free.
+ * @param rows The number of rows in the array.
+ */
 static void free_2d_float_array(LimdyMemoryPool *pool, float **array, size_t rows)
 {
     if (!array)
@@ -38,7 +63,12 @@ static void free_2d_float_array(LimdyMemoryPool *pool, float **array, size_t row
     limdy_memory_pool_free_to(pool, array);
 }
 
-// Translator functions
+/**
+ * @brief Creates a new Translator instance.
+ *
+ * @param service The translation service to use.
+ * @return A pointer to the new Translator, or NULL if creation fails.
+ */
 Translator *translator_create(TranslationService *service)
 {
     CHECK_NULL(service, NULL);
@@ -67,6 +97,11 @@ Translator *translator_create(TranslationService *service)
     return translator;
 }
 
+/**
+ * @brief Destroys a Translator instance and frees its resources.
+ *
+ * @param translator The Translator to destroy.
+ */
 void translator_destroy(Translator *translator)
 {
     if (translator)
@@ -77,6 +112,19 @@ void translator_destroy(Translator *translator)
     }
 }
 
+/**
+ * @brief Performs a translation operation.
+ *
+ * This function translates the given text from the source language to the target language
+ * and generates an attention matrix for alignment.
+ *
+ * @param translator The Translator to use.
+ * @param text The text to translate.
+ * @param source_lang The source language.
+ * @param target_lang The target language.
+ * @param result Pointer to store the translation result.
+ * @return ErrorCode indicating success or failure.
+ */
 ErrorCode translator_translate(Translator *translator, const char *text, const char *source_lang, const char *target_lang, TranslationResult *result)
 {
     CHECK_NULL(translator, ERROR_NULL_POINTER);
@@ -111,7 +159,13 @@ ErrorCode translator_translate(Translator *translator, const char *text, const c
     return ERROR_SUCCESS;
 }
 
-// Aligner functions
+/**
+ * @brief Creates a new Aligner instance.
+ *
+ * @param service The alignment service to use.
+ * @param renderer The renderer to use for tokenization.
+ * @return A pointer to the new Aligner, or NULL if creation fails.
+ */
 Aligner *aligner_create(AlignmentService *service, Renderer *renderer)
 {
     CHECK_NULL(service, NULL);
@@ -142,6 +196,11 @@ Aligner *aligner_create(AlignmentService *service, Renderer *renderer)
     return aligner;
 }
 
+/**
+ * @brief Destroys an Aligner instance and frees its resources.
+ *
+ * @param aligner The Aligner to destroy.
+ */
 void aligner_destroy(Aligner *aligner)
 {
     if (aligner)
@@ -152,6 +211,22 @@ void aligner_destroy(Aligner *aligner)
     }
 }
 
+/**
+ * @brief Performs an alignment operation.
+ *
+ * This function aligns the source text with the target (translated) text using
+ * the provided attention matrix.
+ *
+ * @param aligner The Aligner to use.
+ * @param source_text The source text.
+ * @param target_text The target (translated) text.
+ * @param attention_matrix The attention matrix.
+ * @param rows Number of rows in the attention matrix.
+ * @param cols Number of columns in the attention matrix.
+ * @param aligned_text Pointer to store the aligned text.
+ * @param aligned_size Pointer to store the size of the aligned text.
+ * @return ErrorCode indicating success or failure.
+ */
 ErrorCode aligner_align(Aligner *aligner, const char *source_text, const char *target_text, float **attention_matrix, size_t rows, size_t cols, char ***aligned_text, size_t *aligned_size)
 {
     CHECK_NULL(aligner, ERROR_NULL_POINTER);
@@ -239,7 +314,14 @@ cleanup:
     return error;
 }
 
-// TranslatorAligner functions
+/**
+ * @brief Creates a new TranslatorAligner instance.
+ *
+ * @param trans_service The translation service to use.
+ * @param align_service The alignment service to use.
+ * @param renderer The renderer to use for tokenization.
+ * @return A pointer to the new TranslatorAligner, or NULL if creation fails.
+ */
 TranslatorAligner *translator_aligner_create(TranslationService *trans_service, AlignmentService *align_service, Renderer *renderer)
 {
     CHECK_NULL(trans_service, NULL);
@@ -288,6 +370,11 @@ TranslatorAligner *translator_aligner_create(TranslationService *trans_service, 
     return ta;
 }
 
+/**
+ * @brief Destroys a TranslatorAligner instance and frees its resources.
+ *
+ * @param ta The TranslatorAligner to destroy.
+ */
 void translator_aligner_destroy(TranslatorAligner *ta)
 {
     if (ta)
@@ -299,6 +386,20 @@ void translator_aligner_destroy(TranslatorAligner *ta)
         limdy_memory_pool_free(ta);
     }
 }
+
+/**
+ * @brief Performs a combined translation and alignment operation.
+ *
+ * This function translates the given text and then aligns it with the original text.
+ *
+ * @param ta The TranslatorAligner to use.
+ * @param text The text to translate and align.
+ * @param source_lang The source language.
+ * @param target_lang The target language.
+ * @param aligned_text Pointer to store the aligned text.
+ * @param aligned_size Pointer to store the size of the aligned text.
+ * @return ErrorCode indicating success or failure.
+ */
 ErrorCode translator_aligner_process(TranslatorAligner *ta, const char *text, const char *source_lang, const char *target_lang, char ***aligned_text, size_t *aligned_size)
 {
     CHECK_NULL(ta, ERROR_NULL_POINTER);
@@ -329,16 +430,28 @@ ErrorCode translator_aligner_process(TranslatorAligner *ta, const char *text, co
     MUTEX_UNLOCK(&ta->mutex);
     return error;
 }
-// Helper functions
+
+/**
+ * @brief Frees the resources of a translation result.
+ *
+ * @param result The translation result to free.
+ */
 void free_translation_result(TranslationResult *result)
 {
     if (result)
     {
         limdy_memory_pool_free(result->translated_text);
-        free_2d_float_array(result->attention_matrix, result->rows);
+        free_2d_float_array(result->attention_matrix, result->rows, result->cols);
         memset(result, 0, sizeof(TranslationResult));
     }
 }
+
+/**
+ * @brief Frees the resources of aligned text.
+ *
+ * @param aligned_text The aligned text to free.
+ * @param size The size of the aligned text.
+ */
 void free_aligned_text(char **aligned_text, size_t size)
 {
     if (aligned_text)

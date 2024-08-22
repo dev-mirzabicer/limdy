@@ -1,9 +1,30 @@
+/**
+ * @file limdy_utils.h
+ * @brief Utility macros for the Limdy project.
+ *
+ * This file contains various utility macros that are used throughout the Limdy project.
+ * These macros provide common functionality for error checking, mutex operations,
+ * and other frequently used patterns.
+ *
+ * @author Mirza Bicer
+ * @date 2024-08-22
+ */
+
 #ifndef LIMDY_UTILS_H
 #define LIMDY_UTILS_H
 
 #include "error_handler.h"
 #include <pthread.h>
 
+/**
+ * @brief Checks if a pointer is NULL and logs an error if it is.
+ *
+ * This macro checks if the given pointer is NULL. If it is, it logs an error
+ * with the provided error code and returns that error code.
+ *
+ * @param ptr The pointer to check.
+ * @param error_code The error code to return if the pointer is NULL.
+ */
 #define CHECK_NULL(ptr, error_code)                \
     do                                             \
     {                                              \
@@ -14,6 +35,14 @@
         }                                          \
     } while (0)
 
+/**
+ * @brief Attempts to lock a mutex and logs an error if it fails.
+ *
+ * This macro tries to lock the given mutex. If the lock operation fails,
+ * it logs an error and returns an error code.
+ *
+ * @param mutex The mutex to lock.
+ */
 #define MUTEX_LOCK(mutex)                                         \
     do                                                            \
     {                                                             \
@@ -24,6 +53,14 @@
         }                                                         \
     } while (0)
 
+/**
+ * @brief Attempts to unlock a mutex and logs an error if it fails.
+ *
+ * This macro tries to unlock the given mutex. If the unlock operation fails,
+ * it logs an error and returns an error code.
+ *
+ * @param mutex The mutex to unlock.
+ */
 #define MUTEX_UNLOCK(mutex)                                           \
     do                                                                \
     {                                                                 \

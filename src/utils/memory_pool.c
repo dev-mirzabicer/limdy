@@ -1,36 +1,76 @@
+/**
+ * @file memory_pool.c
+ * @brief Implementation of the memory pool management system.
+ *
+ * This file contains the implementation of the Limdy memory pool system,
+ * providing efficient memory allocation and deallocation for small and large
+ * memory blocks. It implements the interface defined in memory_pool.h.
+ *
+ * @author Mirza Bicer
+ * @date 2024-08-22
+ */
+
 #include "utils/memory_pool.h"
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <assert.h>
 
+/**
+ * @brief Aligns a size to the specified alignment.
+ *
+ * @param size The size to align.
+ * @param align The alignment boundary.
+ * @return The aligned size.
+ */
 #define ALIGN_SIZE(size, align) (((size) + (align) - 1) & ~((align) - 1))
+
+/**
+ * @brief Minimum size of a memory block.
+ */
 #define MIN_BLOCK_SIZE (sizeof(struct MemoryBlock))
+
+/**
+ * @brief Memory alignment used for allocations.
+ */
 #define ALIGNMENT 16
 
+/**
+ * @brief Structure representing a block of memory in the pool.
+ */
 struct MemoryBlock
 {
-    size_t size;
-    int in_use;
-    struct MemoryBlock *next;
-    uintptr_t data[];
+    size_t size;              /**< Size of the block */
+    int in_use;               /**< Flag indicating if the block is in use */
+    struct MemoryBlock *next; /**< Pointer to the next block */
+    uintptr_t data[];         /**< Flexible array member for the actual data */
 };
 
+/**
+ * @brief Structure representing a memory pool.
+ */
 struct LimdyMemoryPool
 {
-    void *memory;
-    struct MemoryBlock *free_list;
-    size_t total_size;
-    size_t used_size;
-    pthread_mutex_t mutex;
+    void *memory;                  /**< Pointer to the pool's memory */
+    struct MemoryBlock *free_list; /**< List of free blocks */
+    size_t total_size;             /**< Total size of the pool */
+    size_t used_size;              /**< Amount of memory currently in use */
+    pthread_mutex_t mutex;         /**< Mutex for thread-safe operations */
 };
 
-static LimdyMemoryPool *small_pools[LIMDY_MAX_POOLS];
-static LimdyMemoryPool *large_pool;
-static size_t num_small_pools = 0;
-static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER;
-static LimdyMemoryPoolConfig global_config;
+static LimdyMemoryPool *small_pools[LIMDY_MAX_POOLS];            /**< Array of small memory pools */
+static LimdyMemoryPool *large_pool;                              /**< Large memory pool */
+static size_t num_small_pools = 0;                               /**< Number of active small pools */
+static pthread_mutex_t global_mutex = PTHREAD_MUTEX_INITIALIZER; /**< Global mutex for pool management */
+static LimdyMemoryPoolConfig global_config;                      /**< Global configuration */
 
+/**
+ * @brief Creates a new memory pool.
+ *
+ * @param pool_size Size of the pool to create.
+ * @param new_pool Pointer to store the newly created pool.
+ * @return ErrorCode indicating success or failure.
+ */
 static ErrorCode create_pool(size_t pool_size, LimdyMemoryPool **new_pool)
 {
     *new_pool = (LimdyMemoryPool *)malloc(sizeof(LimdyMemoryPool));
@@ -119,6 +159,15 @@ void limdy_memory_pool_cleanup(void)
     }
 }
 
+/**
+ * @brief Allocates memory from a specific pool.
+ *
+ * This function implements the first-fit algorithm for memory allocation.
+ *
+ * @param pool The pool to allocate from.
+ * @param size The size of memory to allocate.
+ * @return Pointer to the allocated memory, or NULL if allocation fails.
+ */
 static void *allocate_from_pool(LimdyMemoryPool *pool, size_t size)
 {
     pthread_mutex_lock(&pool->mutex);
@@ -132,6 +181,7 @@ static void *allocate_from_pool(LimdyMemoryPool *pool, size_t size)
         {
             if (block->size >= size + MIN_BLOCK_SIZE)
             {
+                // Split the block if it's large enough
                 struct MemoryBlock *new_block = (struct MemoryBlock *)((char *)block + sizeof(struct MemoryBlock) + size);
                 new_block->size = block->size - size - sizeof(struct MemoryBlock);
                 new_block->in_use = 0;
@@ -176,6 +226,12 @@ void *limdy_memory_pool_alloc(size_t size)
     return allocate_from_pool(large_pool, size);
 }
 
+/**
+ * @brief Finds the pool that contains the given pointer.
+ *
+ * @param ptr The pointer to search for.
+ * @return The pool containing the pointer, or NULL if not found.
+ */
 static LimdyMemoryPool *find_pool(void *ptr)
 {
     for (size_t i = 0; i < num_small_pools; i++)
