@@ -15,6 +15,7 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <pthread.h>
 #include "error_handler.h"
 #include "memory_pool.h"
 #include "limdy_types.h"
