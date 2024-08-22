@@ -1,7 +1,7 @@
-#include "translator_aligner.h"
+#include "components/translator_aligner.h"
 #include <stdlib.h>
 #include <string.h>
-#include "limdy_utils.h"
+#include "utils/limdy_utils.h"
 
 // Helper function to allocate 2D float array using memory pool
 static float **allocate_2d_float_array(LimdyMemoryPool *pool, size_t rows, size_t cols)

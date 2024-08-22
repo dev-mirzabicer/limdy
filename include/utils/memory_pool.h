@@ -1,9 +1,9 @@
-#ifndef MEMORY_POOL_H
-#define MEMORY_POOL_H
+#ifndef LIMDY_UTILS_MEMORY_POOL_H
+#define LIMDY_UTILS_MEMORY_POOL_H
 
 #include <stddef.h>
 #include <stdint.h>
-#include "error_handler.h"
+#include "utils/error_handler.h"
 
 #define LIMDY_SMALL_BLOCK_SIZE 64
 #define LIMDY_SMALL_POOL_SIZE (1024 * 1024)      // 1MB
@@ -58,4 +58,4 @@ void limdy_memory_pool_free_to(LimdyMemoryPool *pool, void *ptr);
 #define LIMDY_MEMORY_POOL_ERROR_POOL_FULL (LIMDY_MEMORY_POOL_ERROR_BASE + 4)
 #define LIMDY_MEMORY_POOL_ERROR_INVALID_POOL (LIMDY_MEMORY_POOL_ERROR_BASE + 5)
 
-#endif // MEMORY_POOL_H
+#endif // LIMDY_UTILS_MEMORY_POOL_H

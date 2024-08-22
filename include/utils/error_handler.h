@@ -1,5 +1,5 @@
-#ifndef ERROR_HANDLER_H
-#define ERROR_HANDLER_H
+#ifndef LIMDY_UTILS_ERROR_HANDLER_H
+#define LIMDY_UTILS_ERROR_HANDLER_H
 
 #include <stddef.h>
 #include <stdarg.h>

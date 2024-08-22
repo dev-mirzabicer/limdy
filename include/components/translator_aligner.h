@@ -1,5 +1,5 @@
-#ifndef TRANSLATOR_ALIGNER_H
-#define TRANSLATOR_ALIGNER_H
+#ifndef LIMDY_COMPONENTS_TRANSLATOR_ALIGNER_H
+#define LIMDY_COMPONENTS_TRANSLATOR_ALIGNER_H
 
 #include <stddef.h>
 #include <pthread.h>
@@ -68,4 +68,4 @@ ErrorCode translator_aligner_process(TranslatorAligner *ta, const char *text, co
 void free_translation_result(TranslationResult *result);
 void free_aligned_text(char **aligned_text, size_t size);
 
-#endif // TRANSLATOR_ALIGNER_H
+#endif // LIMDY_COMPONENTS_TRANSLATOR_ALIGNER_H
