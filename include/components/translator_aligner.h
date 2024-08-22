@@ -29,6 +29,7 @@ typedef struct
     float **attention_matrix; /**< Attention matrix (from the translator) for alignment */
     size_t rows;              /**< Number of rows in the attention matrix */
     size_t cols;              /**< Number of columns in the attention matrix */
+    LimdyMemoryPool *pool;    /**< Memory pool for this translation result */
 } TranslationResult;
 
 /**
@@ -211,6 +212,15 @@ ErrorCode translator_aligner_process(TranslatorAligner *ta, const char *text, co
  * @param result The translation result to free.
  */
 void free_translation_result(TranslationResult *result);
+
+/**
+ * @brief Allocate memory for a translation result.
+ *
+ * @param result Pointer to the TranslationResult structure to initialize.
+ * @param pool_size The size of the memory pool to create for this result.
+ * @return ErrorCode indicating success or failure.
+ */
+ErrorCode allocate_translation_result(TranslationResult *result, size_t pool_size);
 
 /**
  * @brief Free the resources of aligned text.
