@@ -24,10 +24,10 @@
  */
 Translator *translator_create(TranslationService *service)
 {
-    CHECK_NULL(service, NULL);
+    CHECK_NULL(service, ERROR_NULL_POINTER);
 
     Translator *translator = limdy_memory_pool_alloc(sizeof(Translator));
-    CHECK_NULL(translator, NULL);
+    CHECK_NULL(translator, ERROR_MEMORY_ALLOCATION);
 
     translator->service = service;
 
@@ -92,7 +92,7 @@ ErrorCode translator_translate(Translator *translator, const char *text, const c
 
     MUTEX_LOCK(&translator->mutex);
 
-    ErrorCode error = allocate_translation_result(result, LIMDY_LARGE_POOL_SIZE); // Use a large pool for potentially big translations
+    ErrorCode error = allocate_translation_result(result, LIMDY_LARGE_POOL_SIZE); // TODO Implement flexible pool size
     if (error != ERROR_SUCCESS)
     {
         MUTEX_UNLOCK(&translator->mutex);
@@ -324,7 +324,7 @@ TranslatorAligner *translator_aligner_create(TranslationService *trans_service, 
         return NULL;
     }
 
-    ErrorCode error = limdy_memory_pool_create(LIMDY_SMALL_POOL_SIZE, &ta->pool);
+    ErrorCode error = limdy_memory_pool_create(LIMDY_LARGE_POOL_SIZE, &ta->pool); // TODO Implement flexible pool size
     if (error != ERROR_SUCCESS)
     {
         pthread_mutex_destroy(&ta->mutex);
