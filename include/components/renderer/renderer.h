@@ -19,75 +19,8 @@
 #include "error_handler.h"
 #include "memory_pool.h"
 #include "limdy_types.h"
-
-/**
- * @brief Enumeration of token classes.
- */
-typedef enum
-{
-    CLS_NOUN,
-    CLS_VERB,
-    CLS_ADJECTIVE,
-    // Add more classes as needed
-    CLS_COUNT
-} TokenClass;
-
-/**
- * @brief Structure representing a token.
- */
-typedef struct
-{
-    char *text;
-    size_t length;
-} Token;
-
-/**
- * @brief Structure representing a classified token.
- */
-typedef struct
-{
-    Token *token;
-    TokenClass *classes;
-    size_t class_count;
-    bool is_placeholder;
-} ClassifiedToken;
-
-/**
- * @brief Union representing a linguistic element (Vocab, Phrase, or Syntax).
- */
-typedef union
-{
-    Token *vocab;
-    struct
-    {
-        ClassifiedToken *tokens;
-        size_t token_count;
-    } phrase;
-    struct
-    {
-        ClassifiedToken *tokens;
-        size_t token_count;
-    } syntax;
-} LinguisticElement;
-
-/**
- * @brief Enumeration of linguistic element types.
- */
-typedef enum
-{
-    ELEMENT_VOCAB,
-    ELEMENT_PHRASE,
-    ELEMENT_SYNTAX
-} LinguisticElementType;
-
-/**
- * @brief Structure representing a linguistic element with its type.
- */
-typedef struct
-{
-    LinguisticElementType type;
-    LinguisticElement element;
-} TypedLinguisticElement;
+#include "token.h"
+#include "linguistic_element.h"
 
 /**
  * @brief Structure holding the results of rendering.
@@ -96,29 +29,18 @@ typedef struct
 {
     Token *tokens;
     size_t token_count;
-    ClassifiedToken *classified_tokens;
-    size_t classified_token_count;
-    TypedLinguisticElement *elements;
-    size_t element_count;
+    LinguisticElementMap vocab_map;
+    LinguisticElementMap phrase_map;
+    LinguisticElementMap syntax_map;
+    LimdyMemoryPool *pool;
 } RendererResult;
-
-/**
- * @brief Interface for tokenization services.
- */
-typedef struct TokenizationService
-{
-    ErrorCode (*tokenize)(const char *text, Language lang, Token **tokens, size_t *token_count);
-    void (*free_tokens)(Token *tokens, size_t token_count);
-    void (*destroy)(struct TokenizationService *service);
-} TokenizationService;
 
 /**
  * @brief Interface for classification services.
  */
 typedef struct ClassificationService
 {
-    ErrorCode (*classify)(const Token *tokens, size_t token_count, ClassifiedToken **classified_tokens, size_t *classified_token_count);
-    void (*free_classified_tokens)(ClassifiedToken *classified_tokens, size_t classified_token_count);
+    ErrorCode (*classify)(Token *tokens, size_t token_count);
     void (*destroy)(struct ClassificationService *service);
 } ClassificationService;
 

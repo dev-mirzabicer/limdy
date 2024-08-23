@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "renderer.h"
-#include "error_handler.h"
+#include "limdy_utils.h"
 
 /**
  * @brief Create a new Renderer.
@@ -28,18 +28,12 @@
  */
 Renderer *renderer_create(LimdyMemoryPool *pool, TokenizationService *tokenization_service, ClassificationService *classification_service)
 {
-    if (!pool || !tokenization_service || !classification_service)
-    {
-        LOG_ERROR(ERROR_NULL_POINTER, "Null pointer passed to renderer_create");
-        return NULL;
-    }
+    CHECK_NULL(pool, ERROR_NULL_POINTER);
+    CHECK_NULL(tokenization_service, ERROR_NULL_POINTER);
+    CHECK_NULL(classification_service, ERROR_NULL_POINTER);
 
     Renderer *renderer = limdy_memory_pool_alloc_from(pool, sizeof(Renderer));
-    if (!renderer)
-    {
-        LOG_ERROR(ERROR_MEMORY_ALLOCATION, "Failed to allocate memory for Renderer");
-        return NULL;
-    }
+    CHECK_NULL(renderer, ERROR_MEMORY_ALLOCATION);
 
     renderer->pool = pool;
     renderer->tokenization_service = tokenization_service;
@@ -66,11 +60,7 @@ Renderer *renderer_create(LimdyMemoryPool *pool, TokenizationService *tokenizati
  */
 void renderer_destroy(Renderer *renderer)
 {
-    if (!renderer)
-    {
-        LOG_ERROR(ERROR_NULL_POINTER, "Null pointer passed to renderer_destroy");
-        return;
-    }
+    CHECK_NULL(renderer, ERROR_NULL_POINTER);
 
     if (pthread_mutex_destroy(&renderer->mutex) != 0)
     {
@@ -114,10 +104,9 @@ void renderer_destroy(Renderer *renderer)
  */
 ErrorCode renderer_tokenize(Renderer *renderer, const char *text, Language lang, RendererResult *result)
 {
-    if (!renderer || !text || !result)
-    {
-        return ERROR_NULL_POINTER;
-    }
+    CHECK_NULL(renderer, ERROR_NULL_POINTER);
+    CHECK_NULL(text, ERROR_NULL_POINTER);
+    CHECK_NULL(result, ERROR_NULL_POINTER);
 
     ErrorCode error = ERROR_SUCCESS;
 
@@ -131,29 +120,51 @@ ErrorCode renderer_tokenize(Renderer *renderer, const char *text, Language lang,
             break;
         }
 
-        Token *tokens = NULL;
-        size_t token_count = 0;
-
-        error = renderer->tokenization_service->tokenize(text, lang, &tokens, &token_count);
+        error = renderer->tokenization_service->tokenize(text, lang, &result->tokens, &result->token_count);
         if (error != ERROR_SUCCESS)
         {
             break;
         }
 
-        // Allocate memory for the tokens in the result
-        result->tokens = limdy_memory_pool_alloc_from(renderer->pool, sizeof(Token) * token_count);
-        if (!result->tokens)
+        // Allocate memory for tokens from the result's pool
+        Token *pooled_tokens = limdy_memory_pool_alloc_from(result->pool, sizeof(Token) * result->token_count);
+        if (!pooled_tokens)
         {
             error = ERROR_MEMORY_ALLOCATION;
             break;
         }
 
-        // Copy tokens to the result
-        memcpy(result->tokens, tokens, sizeof(Token) * token_count);
-        result->token_count = token_count;
+        // Copy tokens to the pooled memory
+        for (size_t i = 0; i < result->token_count; i++)
+        {
+            pooled_tokens[i] = result->tokens[i];
+            pooled_tokens[i].text = limdy_memory_pool_alloc_from(result->pool, result->tokens[i].length + 1);
+            if (!pooled_tokens[i].text)
+            {
+                error = ERROR_MEMORY_ALLOCATION;
+                break;
+            }
+            memcpy(pooled_tokens[i].text, result->tokens[i].text, result->tokens[i].length + 1);
+        }
 
-        // Free the tokens returned by the service
-        renderer->tokenization_service->free_tokens(tokens, token_count);
+        if (error == ERROR_SUCCESS)
+        {
+            // Free the original tokens and replace with pooled tokens
+            renderer->tokenization_service->free_tokens(result->tokens, result->token_count);
+            result->tokens = pooled_tokens;
+        }
+        else
+        {
+            // Clean up on error
+            for (size_t i = 0; i < result->token_count; i++)
+            {
+                if (pooled_tokens[i].text)
+                {
+                    limdy_memory_pool_free_to(result->pool, pooled_tokens[i].text);
+                }
+            }
+            limdy_memory_pool_free_to(result->pool, pooled_tokens);
+        }
 
     } while (0);
 
@@ -173,10 +184,9 @@ ErrorCode renderer_tokenize(Renderer *renderer, const char *text, Language lang,
  */
 ErrorCode renderer_classify(Renderer *renderer, RendererResult *result)
 {
-    if (!renderer || !result || !result->tokens)
-    {
-        return ERROR_NULL_POINTER;
-    }
+    CHECK_NULL(renderer, ERROR_NULL_POINTER);
+    CHECK_NULL(result, ERROR_NULL_POINTER);
+    CHECK_NULL(result->tokens, ERROR_NULL_POINTER);
 
     ErrorCode error = ERROR_SUCCESS;
 
@@ -190,29 +200,11 @@ ErrorCode renderer_classify(Renderer *renderer, RendererResult *result)
             break;
         }
 
-        ClassifiedToken *classified_tokens = NULL;
-        size_t classified_token_count = 0;
-
-        error = renderer->classification_service->classify(result->tokens, result->token_count, &classified_tokens, &classified_token_count);
+        error = renderer->classification_service->classify(result->tokens, result->token_count);
         if (error != ERROR_SUCCESS)
         {
             break;
         }
-
-        // Allocate memory for the classified tokens in the result
-        result->classified_tokens = limdy_memory_pool_alloc_from(renderer->pool, sizeof(ClassifiedToken) * classified_token_count);
-        if (!result->classified_tokens)
-        {
-            error = ERROR_MEMORY_ALLOCATION;
-            break;
-        }
-
-        // Copy classified tokens to the result
-        memcpy(result->classified_tokens, classified_tokens, sizeof(ClassifiedToken) * classified_token_count);
-        result->classified_token_count = classified_token_count;
-
-        // Free the classified tokens returned by the service
-        renderer->classification_service->free_classified_tokens(classified_tokens, classified_token_count);
 
     } while (0);
 
@@ -232,10 +224,9 @@ ErrorCode renderer_classify(Renderer *renderer, RendererResult *result)
  */
 ErrorCode renderer_extract_elements(Renderer *renderer, RendererResult *result)
 {
-    if (!renderer || !result || !result->classified_tokens)
-    {
-        return ERROR_NULL_POINTER;
-    }
+    CHECK_NULL(renderer, ERROR_NULL_POINTER);
+    CHECK_NULL(result, ERROR_NULL_POINTER);
+    CHECK_NULL(result->tokens, ERROR_NULL_POINTER);
 
     ErrorCode error = ERROR_SUCCESS;
 
@@ -243,27 +234,45 @@ ErrorCode renderer_extract_elements(Renderer *renderer, RendererResult *result)
 
     do
     {
-        // Allocate memory for elements
-        result->elements = limdy_memory_pool_alloc_from(renderer->pool, sizeof(TypedLinguisticElement) * result->classified_token_count);
-        if (!result->elements)
-        {
-            error = ERROR_MEMORY_ALLOCATION;
+        // Initialize linguistic element maps
+        error = linguistic_element_map_init(&result->vocab_map, result->token_count, result->pool);
+        if (error != ERROR_SUCCESS)
             break;
-        }
 
-        result->element_count = 0;
+        error = linguistic_element_map_init(&result->phrase_map, result->token_count / 2, result->pool);
+        if (error != ERROR_SUCCESS)
+            break;
+
+        error = linguistic_element_map_init(&result->syntax_map, result->token_count / 2, result->pool);
+        if (error != ERROR_SUCCESS)
+            break;
 
         // Extract vocab (single tokens)
-        for (size_t i = 0; i < result->classified_token_count; i++)
+        for (size_t i = 0; i < result->token_count; i++)
         {
-            TypedLinguisticElement *element = &result->elements[result->element_count++];
-            element->type = ELEMENT_VOCAB;
-            element->element.vocab = result->classified_tokens[i].token;
+            Token **token_ptr = limdy_memory_pool_alloc_from(result->pool, sizeof(Token *));
+            if (!token_ptr)
+            {
+                error = ERROR_MEMORY_ALLOCATION;
+                break;
+            }
+            *token_ptr = &result->tokens[i];
+
+            TypedLinguisticElement element = {
+                .type = ELEMENT_VOCAB,
+                .element = {
+                    .tokens = token_ptr,
+                    .token_count = 1,
+                    .hash = hash_token(&result->tokens[i]) // Implement this hash function
+                }};
+            error = linguistic_element_map_add(&result->vocab_map, &element);
+            if (error != ERROR_SUCCESS)
+                break;
         }
 
         // TODO: Implement phrase and syntax extraction
-        // This would involve analyzing the classified tokens to identify phrases and syntactic structures
-        // For now, we'll leave this as a placeholder
+        // This would involve analyzing the tokens to identify phrases and syntactic structures
+        // You'll need to implement the logic for creating and hashing these more complex structures
 
     } while (0);
 
@@ -285,10 +294,9 @@ ErrorCode renderer_extract_elements(Renderer *renderer, RendererResult *result)
  */
 ErrorCode renderer_render(Renderer *renderer, const char *text, Language lang, RendererResult *result)
 {
-    if (!renderer || !text || !result)
-    {
-        return ERROR_NULL_POINTER;
-    }
+    CHECK_NULL(renderer, ERROR_NULL_POINTER);
+    CHECK_NULL(text, ERROR_NULL_POINTER);
+    CHECK_NULL(result, ERROR_NULL_POINTER);
 
     ErrorCode error;
 
@@ -332,40 +340,23 @@ ErrorCode renderer_render(Renderer *renderer, const char *text, Language lang, R
  */
 void renderer_free_result(Renderer *renderer, RendererResult *result)
 {
-    if (!renderer || !result)
-    {
-        return;
-    }
+    CHECK_NULL(renderer, ERROR_NULL_POINTER);
+    CHECK_NULL(result, ERROR_NULL_POINTER);
 
     pthread_mutex_lock(&renderer->mutex);
 
-    if (result->tokens)
+    linguistic_element_map_free(&result->vocab_map);
+    linguistic_element_map_free(&result->phrase_map);
+    linguistic_element_map_free(&result->syntax_map);
+
+    if (result->pool)
     {
-        limdy_memory_pool_free_to(renderer->pool, result->tokens);
-        result->tokens = NULL;
-        result->token_count = 0;
+        limdy_memory_pool_destroy(result->pool);
+        result->pool = NULL;
     }
 
-    if (result->classified_tokens)
-    {
-        for (size_t i = 0; i < result->classified_token_count; i++)
-        {
-            if (result->classified_tokens[i].classes)
-            {
-                limdy_memory_pool_free_to(renderer->pool, result->classified_tokens[i].classes);
-            }
-        }
-        limdy_memory_pool_free_to(renderer->pool, result->classified_tokens);
-        result->classified_tokens = NULL;
-        result->classified_token_count = 0;
-    }
-
-    if (result->elements)
-    {
-        limdy_memory_pool_free_to(renderer->pool, result->elements);
-        result->elements = NULL;
-        result->element_count = 0;
-    }
+    result->tokens = NULL;
+    result->token_count = 0;
 
     pthread_mutex_unlock(&renderer->mutex);
 }
