@@ -10,7 +10,7 @@
  *
  * @author Mirza Bicer
  * @date 2024-08-24
- * @version 1.1
+ * @version 1.2
  */
 
 #ifndef LIMDY_UTILS_MEMORY_POOL_H
@@ -67,6 +67,11 @@
 #define LIMDY_SLAB_MAX_SIZE 128
 
 /**
+ * @brief Default number of objects per slab.
+ */
+#define LIMDY_DEFAULT_SLAB_OBJECTS_PER_SLAB 64
+
+/**
  * @brief Opaque structure representing a memory pool.
  */
 typedef struct LimdyMemoryPool LimdyMemoryPool;
@@ -76,10 +81,11 @@ typedef struct LimdyMemoryPool LimdyMemoryPool;
  */
 typedef struct
 {
-    size_t small_block_size; /**< Size of small memory blocks */
-    size_t small_pool_size;  /**< Size of small memory pools */
-    size_t large_pool_size;  /**< Size of the large memory pool */
-    size_t max_pools;        /**< Maximum number of memory pools */
+    size_t small_block_size;      /**< Size of small memory blocks */
+    size_t small_pool_size;       /**< Size of small memory pools */
+    size_t large_pool_size;       /**< Size of the large memory pool */
+    size_t max_pools;             /**< Maximum number of memory pools */
+    size_t slab_objects_per_slab; /**< Number of objects per slab */
 } LimdyMemoryPoolConfig;
 
 typedef struct
@@ -107,6 +113,7 @@ struct LimdyMemoryPool
     size_t total_size;
     size_t used_size;
     pthread_mutex_t mutex;
+    pthread_rwlock_t rwlock; // For read-heavy operations
 };
 
 static LimdyMemoryPool *small_pools[LIMDY_MAX_POOLS];

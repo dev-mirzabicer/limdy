@@ -8,7 +8,7 @@
  *
  * @author Mirza Bicer
  * @date 2024-08-22
- * @version 1.0
+ * @version 1.1
  */
 
 #include "memory_pool.h"
@@ -17,6 +17,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+
+#ifdef _WIN32
+#define ALIGNED_ALLOC(alignment, size) _aligned_malloc(size, alignment)
+#define ALIGNED_FREE(ptr) _aligned_free(ptr)
+#else
+#define ALIGNED_ALLOC(alignment, size) ({ void *ptr; posix_memalign(&ptr, alignment, size); ptr; })
+#define ALIGNED_FREE(ptr) free(ptr)
+#endif
 
 static void error_fatal(ErrorCode code, const char *file, int line, const char *function, const char *format, ...)
 {
@@ -35,6 +43,13 @@ static void verify_block_magic(struct MemoryBlock *block)
     }
 }
 
+/**
+ * @brief Creates a new memory pool.
+ *
+ * @param pool_size The size of the new pool to create.
+ * @param new_pool Pointer to store the newly created pool.
+ * @return ErrorCode indicating success or failure.
+ */
 static ErrorCode create_pool(size_t pool_size, LimdyMemoryPool **new_pool)
 {
     *new_pool = (LimdyMemoryPool *)malloc(sizeof(LimdyMemoryPool));
@@ -44,7 +59,7 @@ static ErrorCode create_pool(size_t pool_size, LimdyMemoryPool **new_pool)
         return LIMDY_MEMORY_POOL_ERROR_INIT_FAILED;
     }
 
-    (*new_pool)->memory = aligned_alloc(LIMDY_MEMORY_ALIGNMENT, pool_size);
+    (*new_pool)->memory = ALIGNED_ALLOC(LIMDY_MEMORY_ALIGNMENT, pool_size);
     if (!(*new_pool)->memory)
     {
         free(*new_pool);
@@ -63,15 +78,30 @@ static ErrorCode create_pool(size_t pool_size, LimdyMemoryPool **new_pool)
 
     if (pthread_mutex_init(&(*new_pool)->mutex, NULL) != 0)
     {
-        free((*new_pool)->memory);
+        ALIGNED_FREE((*new_pool)->memory);
         free(*new_pool);
         LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INIT_FAILED, "Failed to initialize mutex for pool");
+        return LIMDY_MEMORY_POOL_ERROR_INIT_FAILED;
+    }
+
+    // Initialize the reader-writer lock
+    if (pthread_rwlock_init(&(*new_pool)->rwlock, NULL) != 0)
+    {
+        ALIGNED_FREE((*new_pool)->memory);
+        free(*new_pool);
+        LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INIT_FAILED, "Failed to initialize rwlock for pool");
         return LIMDY_MEMORY_POOL_ERROR_INIT_FAILED;
     }
 
     return ERROR_SUCCESS;
 }
 
+/**
+ * @brief Initializes the memory pool system.
+ *
+ * @param config Pointer to the configuration structure.
+ * @return ErrorCode indicating success or failure.
+ */
 ErrorCode limdy_memory_pool_init(const LimdyMemoryPoolConfig *config)
 {
     if (!config)
@@ -118,14 +148,18 @@ ErrorCode limdy_memory_pool_init(const LimdyMemoryPoolConfig *config)
     return ERROR_SUCCESS;
 }
 
+/**
+ * @brief Cleans up the memory pool system.
+ */
 void limdy_memory_pool_cleanup(void)
 {
     for (size_t i = 0; i < num_small_pools; i++)
     {
         if (small_pools[i])
         {
-            free(small_pools[i]->memory);
+            ALIGNED_FREE(small_pools[i]->memory);
             pthread_mutex_destroy(&small_pools[i]->mutex);
+            pthread_rwlock_destroy(&small_pools[i]->rwlock); // Destroy the reader-writer lock
             free(small_pools[i]);
             small_pools[i] = NULL;
         }
@@ -134,8 +168,9 @@ void limdy_memory_pool_cleanup(void)
 
     if (large_pool)
     {
-        free(large_pool->memory);
+        ALIGNED_FREE(large_pool->memory);
         pthread_mutex_destroy(&large_pool->mutex);
+        pthread_rwlock_destroy(&large_pool->rwlock); // Destroy the reader-writer lock
         free(large_pool);
         large_pool = NULL;
     }
@@ -147,13 +182,20 @@ void limdy_memory_pool_cleanup(void)
     {
         if (slab_allocator.slabs[i])
         {
-            free(slab_allocator.slabs[i]);
+            ALIGNED_FREE(slab_allocator.slabs[i]);
             slab_allocator.slabs[i] = NULL;
         }
     }
     pthread_mutex_destroy(&slab_allocator.mutex);
 }
 
+/**
+ * @brief Allocates memory from a specific pool.
+ *
+ * @param pool Pointer to the pool to allocate from.
+ * @param size The number of bytes to allocate.
+ * @return A pointer to the allocated memory, or NULL if allocation fails.
+ */
 static void *allocate_from_pool(LimdyMemoryPool *pool, size_t size)
 {
     MUTEX_LOCK(&pool->mutex);
@@ -198,6 +240,12 @@ static void *allocate_from_pool(LimdyMemoryPool *pool, size_t size)
     return NULL;
 }
 
+/**
+ * @brief Allocates memory from the pool.
+ *
+ * @param size The number of bytes to allocate.
+ * @return A pointer to the allocated memory, or NULL if allocation fails.
+ */
 void *limdy_memory_pool_alloc(size_t size)
 {
     size = ALIGN_SIZE(size, LIMDY_MEMORY_ALIGNMENT);
@@ -225,6 +273,12 @@ void *limdy_memory_pool_alloc(size_t size)
     return allocate_from_pool(large_pool, size);
 }
 
+/**
+ * @brief Finds the pool that contains the given pointer.
+ *
+ * @param ptr Pointer to search for.
+ * @return Pointer to the pool containing the pointer, or NULL if not found.
+ */
 static LimdyMemoryPool *find_pool(void *ptr)
 {
     LimdyMemoryPool *pool = limdy_rbtree_find_best_fit(&pool_rbtree, (size_t)ptr);
@@ -241,6 +295,11 @@ static LimdyMemoryPool *find_pool(void *ptr)
     return NULL;
 }
 
+/**
+ * @brief Frees memory back to the pool.
+ *
+ * @param ptr Pointer to the memory to be freed.
+ */
 void limdy_memory_pool_free(void *ptr)
 {
     if (!ptr)
@@ -248,20 +307,19 @@ void limdy_memory_pool_free(void *ptr)
         return;
     }
 
-    // Check if the pointer belongs to the slab allocator
-    if ((uintptr_t)ptr % LIMDY_MAX_ALIGN == 0)
+    // Check if the pointer belongs to the slab allocator (inside the mutex lock)
+    MUTEX_LOCK(&slab_allocator.mutex);
+    for (int i = 0; i < LIMDY_SLAB_SIZES; i++)
     {
-        // Assuming all slab-allocated memory is aligned to LIMDY_MAX_ALIGN
-        for (int i = 0; i < LIMDY_SLAB_SIZES; i++)
+        if (slab_allocator.slabs[i] && ptr >= slab_allocator.slabs[i] &&
+            ptr < (char *)slab_allocator.slabs[i] + slab_allocator.slab_sizes[i] * global_config.slab_objects_per_slab)
         {
-            if (slab_allocator.slabs[i] && ptr >= slab_allocator.slabs[i] &&
-                ptr < (char *)slab_allocator.slabs[i] + slab_allocator.slab_sizes[i] * 64)
-            {
-                slab_free(ptr, slab_allocator.slab_sizes[i]);
-                return;
-            }
+            slab_free(ptr, slab_allocator.slab_sizes[i]);
+            MUTEX_UNLOCK(&slab_allocator.mutex);
+            return;
         }
     }
+    MUTEX_UNLOCK(&slab_allocator.mutex);
 
     LimdyMemoryPool *pool = find_pool(ptr);
     if (!pool)
@@ -304,6 +362,36 @@ void limdy_memory_pool_free(void *ptr)
     MUTEX_UNLOCK(&pool->mutex);
 }
 
+/**
+ * @brief Helper function to allocate a new block and copy data for reallocation.
+ *
+ * @param pool Pointer to the pool.
+ * @param ptr Pointer to the original memory block.
+ * @param new_size The new size for the memory block.
+ * @return A pointer to the resized memory block, or NULL if reallocation fails.
+ */
+static void *realloc_allocate_and_copy(LimdyMemoryPool *pool, void *ptr, size_t new_size)
+{
+    void *new_ptr = limdy_memory_pool_alloc(new_size);
+    if (!new_ptr)
+    {
+        return NULL;
+    }
+
+    struct MemoryBlock *block = (struct MemoryBlock *)((char *)ptr - sizeof(struct MemoryBlock));
+    memcpy(new_ptr, ptr, block->size);
+    limdy_memory_pool_free(ptr);
+
+    return new_ptr;
+}
+
+/**
+ * @brief Resizes an existing allocation.
+ *
+ * @param ptr Pointer to the memory block to be resized.
+ * @param new_size The new size for the memory block.
+ * @return A pointer to the resized memory block, or NULL if reallocation fails.
+ */
 void *limdy_memory_pool_realloc(void *ptr, size_t new_size)
 {
     if (!ptr)
@@ -372,21 +460,18 @@ void *limdy_memory_pool_realloc(void *ptr, size_t new_size)
     }
 
     // If extending isn't possible, allocate a new block and copy data
-    void *new_ptr = limdy_memory_pool_alloc(new_size);
-    if (!new_ptr)
-    {
-        MUTEX_UNLOCK(&pool->mutex);
-        LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_ALLOC_FAILED, "Failed to allocate memory for realloc");
-        return NULL;
-    }
-
-    memcpy(new_ptr, ptr, block->size);
-    limdy_memory_pool_free(ptr);
+    void *new_ptr = realloc_allocate_and_copy(pool, ptr, new_size);
     MUTEX_UNLOCK(&pool->mutex);
 
     return new_ptr;
 }
 
+/**
+ * @brief Defragments a memory pool.
+ *
+ * @param pool Pointer to the pool to defragment.
+ * @return ErrorCode indicating success or failure.
+ */
 ErrorCode limdy_memory_pool_defragment(LimdyMemoryPool *pool)
 {
     if (!pool)
@@ -422,6 +507,9 @@ ErrorCode limdy_memory_pool_defragment(LimdyMemoryPool *pool)
 
 static LimdySlabAllocator slab_allocator;
 
+/**
+ * @brief Initializes the slab allocator.
+ */
 static void init_slab_allocator(void)
 {
     pthread_mutex_init(&slab_allocator.mutex, NULL);
@@ -433,6 +521,12 @@ static void init_slab_allocator(void)
     }
 }
 
+/**
+ * @brief Allocates memory from the slab allocator.
+ *
+ * @param size The number of bytes to allocate.
+ * @return A pointer to the allocated memory, or NULL if allocation fails.
+ */
 static void *slab_alloc(size_t size)
 {
     if (size > LIMDY_SLAB_MAX_SIZE)
@@ -456,8 +550,8 @@ static void *slab_alloc(size_t size)
     if (!slab_allocator.free_objects[slab_index])
     {
         // Allocate new slab
-        size_t slab_size = slab_allocator.slab_sizes[slab_index] * 64; // 64 objects per slab
-        void *new_slab = aligned_alloc(LIMDY_MAX_ALIGN, slab_size);
+        size_t slab_size = slab_allocator.slab_sizes[slab_index] * global_config.slab_objects_per_slab;
+        void *new_slab = ALIGNED_ALLOC(LIMDY_MAX_ALIGN, slab_size);
         if (!new_slab)
         {
             MUTEX_UNLOCK(&slab_allocator.mutex);
@@ -465,14 +559,14 @@ static void *slab_alloc(size_t size)
         }
 
         // Initialize free list
-        for (size_t i = 0; i < 63; i++)
+        for (size_t i = 0; i < global_config.slab_objects_per_slab - 1; i++)
         {
             *(void **)((char *)new_slab + i * slab_allocator.slab_sizes[slab_index]) =
                 (char *)new_slab + (i + 1) * slab_allocator.slab_sizes[slab_index];
         }
-        *(void **)((char *)new_slab + 63 * slab_allocator.slab_sizes[slab_index]) = slab_allocator.slabs[slab_index];
+        *(void **)((char *)new_slab + (global_config.slab_objects_per_slab - 1) * slab_allocator.slab_sizes[slab_index]) = slab_allocator.slabs[slab_index];
         slab_allocator.slabs[slab_index] = new_slab;
-        slab_allocator.free_objects[slab_index] = 64;
+        slab_allocator.free_objects[slab_index] = global_config.slab_objects_per_slab;
     }
 
     void *result = slab_allocator.slabs[slab_index];
@@ -483,6 +577,12 @@ static void *slab_alloc(size_t size)
     return result;
 }
 
+/**
+ * @brief Frees memory back to the slab allocator.
+ *
+ * @param ptr Pointer to the memory to be freed.
+ * @param size The size of the memory block.
+ */
 static void slab_free(void *ptr, size_t size)
 {
     if (size > LIMDY_SLAB_MAX_SIZE)
@@ -510,6 +610,12 @@ static void slab_free(void *ptr, size_t size)
     MUTEX_UNLOCK(&slab_allocator.mutex);
 }
 
+/**
+ * @brief Gets current memory usage statistics.
+ *
+ * @param total_allocated Pointer to store the total allocated memory size.
+ * @param total_used Pointer to store the total used memory size.
+ */
 void limdy_memory_pool_get_stats(size_t *total_allocated, size_t *total_used)
 {
     MUTEX_LOCK(&global_mutex); // Ensure thread safety
@@ -529,6 +635,13 @@ void limdy_memory_pool_get_stats(size_t *total_allocated, size_t *total_used)
     MUTEX_UNLOCK(&global_mutex);
 }
 
+/**
+ * @brief Creates a new memory pool.
+ *
+ * @param pool_size The size of the new pool to create.
+ * @param new_pool Pointer to store the newly created pool.
+ * @return ErrorCode indicating success or failure.
+ */
 ErrorCode limdy_memory_pool_create(size_t pool_size, LimdyMemoryPool **new_pool)
 {
     MUTEX_LOCK(&global_mutex);
@@ -550,8 +663,9 @@ ErrorCode limdy_memory_pool_create(size_t pool_size, LimdyMemoryPool **new_pool)
         }
         else
         {
-            free((*new_pool)->memory);
+            ALIGNED_FREE((*new_pool)->memory);
             pthread_mutex_destroy(&(*new_pool)->mutex);
+            pthread_rwlock_destroy(&(*new_pool)->rwlock); // Destroy the reader-writer lock
             free(*new_pool);
             *new_pool = NULL;
         }
@@ -561,6 +675,11 @@ ErrorCode limdy_memory_pool_create(size_t pool_size, LimdyMemoryPool **new_pool)
     return error;
 }
 
+/**
+ * @brief Destroys a memory pool.
+ *
+ * @param pool Pointer to the pool to be destroyed.
+ */
 void limdy_memory_pool_destroy(LimdyMemoryPool *pool)
 {
     if (!pool)
@@ -573,8 +692,9 @@ void limdy_memory_pool_destroy(LimdyMemoryPool *pool)
     {
         if (small_pools[i] == pool)
         {
-            free(pool->memory);
+            ALIGNED_FREE(pool->memory);
             pthread_mutex_destroy(&pool->mutex);
+            pthread_rwlock_destroy(&pool->rwlock); // Destroy the reader-writer lock
             limdy_rbtree_remove(&pool_rbtree, pool);
             free(pool);
             small_pools[i] = small_pools[--num_small_pools];
@@ -586,8 +706,9 @@ void limdy_memory_pool_destroy(LimdyMemoryPool *pool)
     // If pool not found in small_pools, check if it's the large_pool
     if (pool == large_pool)
     {
-        free(pool->memory);
+        ALIGNED_FREE(pool->memory);
         pthread_mutex_destroy(&pool->mutex);
+        pthread_rwlock_destroy(&pool->rwlock); // Destroy the reader-writer lock
         free(pool);
         large_pool = NULL;
         MUTEX_UNLOCK(&global_mutex);
@@ -598,6 +719,13 @@ void limdy_memory_pool_destroy(LimdyMemoryPool *pool)
     LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INVALID_POOL, "Attempt to destroy invalid pool");
 }
 
+/**
+ * @brief Allocates memory from a specific pool.
+ *
+ * @param pool Pointer to the pool to allocate from.
+ * @param size The number of bytes to allocate.
+ * @return A pointer to the allocated memory, or NULL if allocation fails.
+ */
 void *limdy_memory_pool_alloc_from(LimdyMemoryPool *pool, size_t size)
 {
     if (!pool)
@@ -608,31 +736,16 @@ void *limdy_memory_pool_alloc_from(LimdyMemoryPool *pool, size_t size)
     return allocate_from_pool(pool, ALIGN_SIZE(size, LIMDY_MEMORY_ALIGNMENT));
 }
 
-void *limdy_memory_pool_realloc_from(LimdyMemoryPool *pool, void *ptr, size_t new_size)
+/**
+ * @brief Helper function to reallocate memory from a specific pool.
+ *
+ * @param pool Pointer to the pool.
+ * @param ptr Pointer to the original memory block.
+ * @param new_size The new size for the memory block.
+ * @return A pointer to the resized memory block, or NULL if reallocation fails.
+ */
+static void *realloc_from_pool(LimdyMemoryPool *pool, void *ptr, size_t new_size)
 {
-    if (!pool)
-    {
-        LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INVALID_POOL, "Attempt to reallocate from invalid pool");
-        return NULL;
-    }
-
-    if (!ptr)
-    {
-        return limdy_memory_pool_alloc_from(pool, new_size);
-    }
-
-    if (new_size == 0)
-    {
-        limdy_memory_pool_free_to(pool, ptr);
-        return NULL;
-    }
-
-    if (!limdy_memory_pool_contains(pool, ptr))
-    {
-        LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INVALID_FREE, "Attempt to reallocate memory from incorrect pool");
-        return NULL;
-    }
-
     MUTEX_LOCK(&pool->mutex);
 
     struct MemoryBlock *block = (struct MemoryBlock *)((char *)ptr - sizeof(struct MemoryBlock));
@@ -681,20 +794,54 @@ void *limdy_memory_pool_realloc_from(LimdyMemoryPool *pool, void *ptr, size_t ne
     }
 
     // If extending isn't possible, allocate a new block and copy data
-    void *new_ptr = limdy_memory_pool_alloc_from(pool, new_size);
-    if (!new_ptr)
-    {
-        MUTEX_UNLOCK(&pool->mutex);
-        return NULL;
-    }
-
-    memcpy(new_ptr, ptr, block->size);
-    limdy_memory_pool_free_to(pool, ptr);
+    void *new_ptr = realloc_allocate_and_copy(pool, ptr, new_size);
     MUTEX_UNLOCK(&pool->mutex);
 
     return new_ptr;
 }
 
+/**
+ * @brief Resizes an existing allocation in a specific pool.
+ *
+ * @param pool Pointer to the pool to reallocate from.
+ * @param ptr Pointer to the memory block to be resized.
+ * @param new_size The new size for the memory block.
+ * @return A pointer to the resized memory block, or NULL if reallocation fails.
+ */
+void *limdy_memory_pool_realloc_from(LimdyMemoryPool *pool, void *ptr, size_t new_size)
+{
+    if (!pool)
+    {
+        LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INVALID_POOL, "Attempt to reallocate from invalid pool");
+        return NULL;
+    }
+
+    if (!ptr)
+    {
+        return limdy_memory_pool_alloc_from(pool, new_size);
+    }
+
+    if (new_size == 0)
+    {
+        limdy_memory_pool_free_to(pool, ptr);
+        return NULL;
+    }
+
+    if (!limdy_memory_pool_contains(pool, ptr))
+    {
+        LOG_ERROR(LIMDY_MEMORY_POOL_ERROR_INVALID_FREE, "Attempt to reallocate memory from incorrect pool");
+        return NULL;
+    }
+
+    return realloc_from_pool(pool, ptr, new_size);
+}
+
+/**
+ * @brief Frees memory back to a specific pool.
+ *
+ * @param pool Pointer to the pool to free memory to.
+ * @param ptr Pointer to the memory to be freed.
+ */
 void limdy_memory_pool_free_to(LimdyMemoryPool *pool, void *ptr)
 {
     if (!pool || !ptr)
@@ -742,13 +889,26 @@ void limdy_memory_pool_free_to(LimdyMemoryPool *pool, void *ptr)
     MUTEX_UNLOCK(&pool->mutex);
 }
 
+/**
+ * @brief Checks if a pointer belongs to a specific memory pool.
+ *
+ * @param pool Pointer to the memory pool.
+ * @param ptr Pointer to check.
+ * @return true if the pointer belongs to the pool, false otherwise.
+ */
 bool limdy_memory_pool_contains(const LimdyMemoryPool *pool, const void *ptr)
 {
     if (!pool || !ptr)
     {
         return false;
     }
-    return (ptr >= pool->memory && ptr < (char *)pool->memory + pool->total_size);
+
+    // Use reader-writer lock for read-only operation
+    pthread_rwlock_rdlock(&pool->rwlock);
+    bool result = (ptr >= pool->memory && ptr < (char *)pool->memory + pool->total_size);
+    pthread_rwlock_unlock(&pool->rwlock);
+
+    return result;
 }
 
 #ifdef LIMDY_MEMORY_DEBUG
