@@ -71,6 +71,12 @@
         }                                                             \
     } while (0)
 
-// Add any other utility macros here
+#define RETURN_IF_ERROR(expr)    \
+    do                           \
+    {                            \
+        ErrorCode ec = (expr);   \
+        if (ec != ERROR_SUCCESS) \
+            return ec;           \
+    } while (0)
 
 #endif // LIMDY_UTILS_H
