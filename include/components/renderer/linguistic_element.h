@@ -7,20 +7,8 @@
 #include "error_handler.h"
 #include "memory_pool.h"
 #include "token.h"
+#include "limdy_utils.h"
 
-/**
- * @brief Structure representing a linguistic element (Vocab, Phrase, or Syntax).
- */
-typedef struct
-{
-    Token **tokens;
-    size_t token_count;
-    uint64_t hash; // Hash for quick lookup
-} LinguisticElement;
-
-/**
- * @brief Enumeration of linguistic element types.
- */
 typedef enum
 {
     ELEMENT_VOCAB,
@@ -28,59 +16,44 @@ typedef enum
     ELEMENT_SYNTAX
 } LinguisticElementType;
 
-/**
- * @brief Structure representing a linguistic element with its type.
- */
+// Base LinguisticElement (can be used for both disk and memory)
 typedef struct
 {
     LinguisticElementType type;
-    LinguisticElement element;
-} TypedLinguisticElement;
+    Token *tokens;
+    size_t token_count;
+    uint64_t hash; // Pre-computed hash for quick lookup
+} LinguisticElement;
 
-/**
- * @brief Structure for efficient storage and lookup of linguistic elements.
- */
+// Extended LinguisticElement for in-memory use
 typedef struct
 {
-    TypedLinguisticElement *elements;
+    LinguisticElement base;
+    Token ***occurrences; // Array of arrays of token pointers
+    size_t occurrence_count;
+} ExtendedLinguisticElement;
+
+typedef struct
+{
+    ExtendedLinguisticElement *elements;
     size_t element_count;
     size_t capacity;
     LimdyMemoryPool *pool; // Memory pool for this map
 } LinguisticElementMap;
 
-/**
- * @brief Initialize a LinguisticElementMap.
- *
- * @param map Pointer to the LinguisticElementMap to initialize.
- * @param initial_capacity Initial capacity of the map.
- * @param pool Memory pool to use for allocations.
- * @return ErrorCode indicating success or failure.
- */
+// Function prototypes
 ErrorCode linguistic_element_map_init(LinguisticElementMap *map, size_t initial_capacity, LimdyMemoryPool *pool);
-
-/**
- * @brief Add a linguistic element to the map.
- *
- * @param map Pointer to the LinguisticElementMap.
- * @param element Pointer to the TypedLinguisticElement to add.
- * @return ErrorCode indicating success or failure.
- */
-ErrorCode linguistic_element_map_add(LinguisticElementMap *map, TypedLinguisticElement *element);
-
-/**
- * @brief Find a linguistic element in the map.
- *
- * @param map Pointer to the LinguisticElementMap.
- * @param hash Hash of the element to find.
- * @return Pointer to the found TypedLinguisticElement, or NULL if not found.
- */
-TypedLinguisticElement *linguistic_element_map_find(LinguisticElementMap *map, uint64_t hash);
-
-/**
- * @brief Free resources used by a LinguisticElementMap.
- *
- * @param map Pointer to the LinguisticElementMap to free.
- */
+ErrorCode linguistic_element_map_add(LinguisticElementMap *map, ExtendedLinguisticElement *element);
+ErrorCode linguistic_element_map_add_occurrence(LinguisticElementMap *map, uint64_t hash, Token **tokens, size_t token_count);
+ExtendedLinguisticElement *linguistic_element_map_find(LinguisticElementMap *map, uint64_t hash);
 void linguistic_element_map_free(LinguisticElementMap *map);
+
+// Hash function declaration
+uint64_t hash_linguistic_element(const Token *tokens, size_t token_count);
+
+// New error codes
+#define LIMDY_LINGUISTIC_ELEMENT_ERROR_BASE (ERROR_CUSTOM_BASE + 200)
+#define LIMDY_LINGUISTIC_ELEMENT_ERROR_MAP_FULL (LIMDY_LINGUISTIC_ELEMENT_ERROR_BASE + 1)
+#define LIMDY_LINGUISTIC_ELEMENT_ERROR_NOT_FOUND (LIMDY_LINGUISTIC_ELEMENT_ERROR_BASE + 2)
 
 #endif // LIMDY_COMPONENTS_RENDERER_LINGUISTIC_ELEMENT_H
